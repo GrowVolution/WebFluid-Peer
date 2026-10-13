@@ -8,12 +8,12 @@ from wf_peering.models.sync import SyncRun
 from wf_peering.protocol import entries
 from wf_peering.protocol.handshake import HELLO_CONTEXT, AUTH_CONTEXT, WELCOME_CONTEXT, MAX_MESSAGE
 from wf_peering.protocol.signing import verify, fingerprint, valid_ed25519, b64encode
-from wf_peering.services import netcheck
 from wf_peering.services.identity import NodeIdentity
 from wf_peering.services.journal import Journal
 from wf_peering.services.ledger import Ledger, LedgerError
-from wf_peering.services.settings import settings, HOST_API, HOST_SOCKET, PROTOCOL_VERSION, SCHEMA_VERSION
 from wf_peering.services.store import State, Conflicts, dumps, loads
+from wf_peering.settings import settings, HOST_API, HOST_SOCKET, PROTOCOL_VERSION, SCHEMA_VERSION
+from wf_peering.utils import netcheck
 
 
 class SyncFailure(Exception):

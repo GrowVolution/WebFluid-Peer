@@ -6,9 +6,9 @@ import hashlib, json
 from wf_peering.models.integrity import Observation
 from wf_peering.protocol import integrity as spec
 from wf_peering.protocol.entries import utc_now
-from wf_peering.services import netcheck
-from wf_peering.services.settings import settings
 from wf_peering.services.store import dumps, Conflicts
+from wf_peering.settings import settings
+from wf_peering.utils import netcheck
 
 
 def _digest(algorithm: str, data: bytes) -> str:

@@ -5,11 +5,11 @@ import asyncio
 from wf_peering import NodeRole, __version__
 from wf_peering.protocol.entries import parse_ts, to_ts
 from wf_peering.protocol.trust import Signal
-from wf_peering.services import netcheck
 from wf_peering.services.journal import Journal
 from wf_peering.services.peers import Peers, check_node
-from wf_peering.services.settings import settings, HOST_API
 from wf_peering.services.store import State
+from wf_peering.settings import settings, HOST_API
+from wf_peering.utils import netcheck
 
 HOUR = 3600
 DAY = 86400

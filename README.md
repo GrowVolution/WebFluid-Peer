@@ -13,10 +13,10 @@ everything they must do identically: protocols, storage, verification, checkpoin
 
 | This app (`fluid/`)                | Job                                                                                    |
 |------------------------------------|----------------------------------------------------------------------------------------|
-| `services/sync.py`                 | `HostLink`: the WebSocket to `/peering/ws/peer` with live replication; `FullSync`: the daily full sync over the host API with root comparison. |
-| `services/observe.py`              | Fetches every published artifact from the host and checks it against the host's claim and the trusted reference. |
-| `services/role.py`                 | `PeerRole`: checkpoint basis, checkpoint publication, peer-only trust signals, status. |
-| `services/jobs.py`                 | Observation interval and the daily full sync (23:59 UTC by default).                   |
+| `utils/sync.py`                    | `HostLink`: the WebSocket to `/peering/ws/peer` with live replication; `FullSync`: the daily full sync over the host API with root comparison. |
+| `utils/observe.py`                 | Fetches every published artifact from the host and checks it against the host's claim and the trusted reference. |
+| `utils/role.py`                    | `PeerRole`: checkpoint basis, checkpoint publication, peer-only trust signals, status. |
+| `jobs.py`                          | Observation interval and the daily full sync (23:59 UTC by default).                   |
 | `api/`                             | The public API under `/api/v1` (shared handlers from `wf-peering`, plus `/sync` and `/integrity/observations`). |
 | `app/`                             | The status page at `/`.                                                                |
 
@@ -30,7 +30,7 @@ Requirements: WebFluid `1.0.0b3` or newer and the `wf-peering` extension in the 
 pip install -e ../wf-site/extensions/peering     # or: wf ocean install -e peering
 ```
 
-`app_configs/peer.ini`:
+`app_configs/main.ini` (`main.example.ini` is the template):
 
 ```ini
 [general]
@@ -45,7 +45,7 @@ EXT_BABEL = 1
 WF_PROCESSING = 1
 
 [data]
-DATABASE_URI = sqlite:///peer.db
+DATABASE_URI = sqlite:///main.db
 ```
 
 `fluid/_my_config.py` (gitignored) overrides the defaults in `fluid/config.py`:
@@ -64,9 +64,15 @@ format 2 manifest that lists several artifacts. The status page is translated on
 needs `EXT_BABEL`; `fluid/config.py` offers English and German.
 
 ```bash
-wf migrate init peer && wf migrate revision peer && wf migrate upgrade peer
-wf run peer -p 8001
+wf migrate init main && wf migrate revision main && wf migrate upgrade main
+wf run main -p 8001
 ```
+
+### With Docker
+
+The `Dockerfile` extends the WebFluid image with `wf-peering`; `docker-compose.yaml` is an example stack
+for a Swarm behind Traefik that mounts the checkout as `/app` and starts the app `main` on port 8000. Set
+the router rule to the peer's own domain — the one in `PEERING_PUBLIC_URL`.
 
 For local development, run the host and the peer with `-d`: in debug mode `wf-peering` allows `http` and
 local addresses (the defaults in `fluid/config.py` point at `http://localhost:8000` and `:8001`) and leaves

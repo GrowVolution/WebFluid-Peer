@@ -3,8 +3,8 @@ from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.interval import IntervalTrigger
 from datetime import datetime, UTC
 
-from wf_peering.services.settings import settings
-from wf_peering.services.tasks import guarded
+from wf_peering.jobs import guarded
+from wf_peering.settings import settings
 
 
 @guarded("observe")

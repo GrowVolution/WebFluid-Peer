@@ -1,0 +1,30 @@
+################################################################
+#    Example compose stack for WebFluid-Peer orchestration.    #
+################################################################
+
+services:
+  peer:
+    build: .
+    command: ["main", "-h", "0.0.0.0"]
+    volumes:
+      - ./:/app
+    networks:
+      - traefik
+    deploy:
+      replicas: 1
+      placement:
+        constraints:
+          - node.role == worker
+      labels:
+        - traefik.enable=true
+
+        - traefik.http.routers.myPeer.entrypoints=websecure
+        - traefik.http.routers.myPeer.rule=Host(`peer.example.org`)
+        - traefik.http.routers.myPeer.service=myPeer
+        - traefik.http.routers.myPeer.tls=true
+
+        - traefik.http.services.myPeer.loadbalancer.server.port=8000
+
+
+networks:
+  traefik: { external: true }
