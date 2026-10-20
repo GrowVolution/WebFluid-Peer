@@ -1,7 +1,7 @@
 from webfluid.core.ext import db
 from webfluid.utils.logging import factory as log_factory
 from sqlalchemy import select
-from datetime import datetime, UTC
+from datetime import datetime, timedelta, UTC
 import asyncio, json, secrets, uuid
 
 from wf_peering.models.sync import SyncRun
@@ -14,6 +14,8 @@ from wf_peering.services.ledger import Ledger, LedgerError
 from wf_peering.services.store import State, Conflicts, dumps, loads
 from wf_peering.settings import settings, HOST_API, HOST_SOCKET, PROTOCOL_VERSION, SCHEMA_VERSION
 from wf_peering.utils import netcheck
+
+FRESH_SYNC = timedelta(hours=26)
 
 
 class SyncFailure(Exception):
@@ -377,3 +379,20 @@ class FullSync:
             result = await e.exec(select(SyncRun).where(SyncRun.status == "success")
                                   .order_by(SyncRun.finished_at.desc()).limit(1))
             return result.first()
+
+    @staticmethod
+    async def close_interrupted() -> int:
+        async with db.async_executor(model=SyncRun) as e:
+            result = await e.exec(select(SyncRun).where(SyncRun.status == "running"))
+            rows = list(result.all())
+            for row in rows:
+                row.status = "failed"
+                row.error = "INTERRUPTED"
+                row.finished_at = entries.utc_now()
+            return len(rows)
+
+    @classmethod
+    async def due(cls) -> bool:
+        last = await cls.last_success()
+        if last is None or not last.finished_at: return True
+        return datetime.now(UTC) - entries.parse_ts(last.finished_at) >= FRESH_SYNC

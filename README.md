@@ -84,6 +84,23 @@ page say that the node runs in debug mode.
 address instead of `localhost` — makes the peer report the host's identity as `URL_MISMATCH`, and clients
 don't count the peer as confirming the host they visit.
 
+The host checks `PEERING_PUBLIC_URL` when the peer connects: it fetches `<PEERING_PUBLIC_URL>/api/v1/node`
+and refuses the connection (`URL_UNREACHABLE`, `URL_NOT_VERIFIED`) unless this peer answers there. The
+address therefore has to be reachable from the host, and the browsers and apps that check the host fetch
+it too.
+
+To test with a phone in the LAN, start the host with `-d -h 0.0.0.0` and `BASE_URL` set to the computer's
+LAN address, and this peer with `-d -h 0.0.0.0`, `PEERING_HOST` set to that address and
+`PEERING_PUBLIC_URL` to the LAN address of this peer (`http://<lan-ip>:8001`) — `localhost` would point the
+phone at itself. A browser on the same computer then opens the host on `localhost`; in debug mode it treats
+that page as an alias of `BASE_URL`. Peers and host on one computer share a network and are therefore never
+counted as independent of each other, so the trust check stays *unclear* in that setup by design.
+
+A freshly started peer observes the host's scripts 30 seconds after the start instead of after the first
+`PEERING_INTEGRITY_INTERVAL`, and runs a full sync a minute after the start when its last successful sync is
+missing or older than 26 hours. A sync that was still running when the process ended is closed as
+`INTERRUPTED` at the next start.
+
 The node key is created in `keys/node.key` (gitignored, mode `0600`) on first start, or taken from
 `PEERING_NODE_KEY`. Losing it gives the peer a new identity; other nodes record that as a key change.
 
@@ -115,7 +132,7 @@ pytest tests
 The tests run a copy of this app against a fake host (`tests/fakehost.py`) and the installed `wf-peering`:
 full and live sync, retries, schema mismatches, rewritten and truncated histories, a changed host key,
 artifact observations against format 1 and format 2 references, unserved records, node identity and TLS
-classification, trust and the path layout.
+classification, trust, the path layout, and closing interrupted syncs.
 
 ---
 

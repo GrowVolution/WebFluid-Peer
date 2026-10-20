@@ -22,8 +22,9 @@ class PeerRole(NodeRole):
         self.software = f"peering-app/{version or '0'} wf-peering/{__version__}"
 
     async def startup(self) -> None:
-        from .sync import HostLink
-        await Journal.append("peering:peer-start", { "host": settings.host })
+        from .sync import HostLink, FullSync
+        interrupted = await FullSync.close_interrupted()
+        await Journal.append("peering:peer-start", { "host": settings.host, "interrupted_syncs": interrupted })
         HostLink.ensure()
 
     async def heartbeat(self) -> None:
@@ -71,7 +72,7 @@ class PeerRole(NodeRole):
         await HostLink.send({ "type": "checkpoint", **signed })
 
     async def signals(self, now: datetime) -> list:
-        from .sync import HostLink, FullSync
+        from .sync import HostLink, FullSync, FRESH_SYNC
         signals = []
         link = HostLink.snapshot()
         beat = link.get("last_heartbeat")
@@ -83,7 +84,7 @@ class PeerRole(NodeRole):
         last = await FullSync.last_success()
         sync_age = (now - parse_ts(last.finished_at)).total_seconds() if last and last.finished_at else None
         signals.append(Signal("full_sync_fresh", "integrity",
-                              None if sync_age is None else (100 if sync_age < 26 * HOUR else (50 if sync_age < 50 * HOUR else 10)),
+                              None if sync_age is None else (100 if sync_age < FRESH_SYNC.total_seconds() else (50 if sync_age < 50 * HOUR else 10)),
                               15, "high", "local", last.finished_at if last else None, None,
                               detail={ "age_seconds": int(sync_age) if sync_age is not None else None }))
         runs = await FullSync.runs(14)
