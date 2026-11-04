@@ -12,7 +12,7 @@ dist/
 logs/
 keys/
 .pytest_cache/
-tests/
+.claude/
 
 [files]
 main.ini

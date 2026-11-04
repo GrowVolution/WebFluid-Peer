@@ -1,15 +1,13 @@
 from webfluid.utils.logging import factory as log_factory
-from datetime import datetime, timedelta, UTC
-import asyncio
-
 from wf_peering import NodeRole, __version__
+from wf_peering.exceptions import CheckError
 from wf_peering.protocol.entries import parse_ts, to_ts
 from wf_peering.protocol.trust import Signal
-from wf_peering.services.journal import Journal
-from wf_peering.services.peers import Peers, check_node
-from wf_peering.services.store import State
+from wf_peering.services import PeerService, JournalService, StateService
 from wf_peering.settings import settings, HOST_API
 from wf_peering.utils import netcheck
+from datetime import datetime, timedelta, UTC
+import asyncio
 
 HOUR = 3600
 DAY = 86400
@@ -24,7 +22,7 @@ class PeerRole(NodeRole):
     async def startup(self) -> None:
         from .sync import HostLink, FullSync
         interrupted = await FullSync.close_interrupted()
-        await Journal.append("peering:peer-start", { "host": settings.host, "interrupted_syncs": interrupted })
+        await JournalService.append("peering:peer-start", { "host": settings.host, "interrupted_syncs": interrupted })
         HostLink.ensure()
 
     async def heartbeat(self) -> None:
@@ -32,15 +30,15 @@ class PeerRole(NodeRole):
         HostLink.ensure()
 
     async def discover(self) -> None:
-        report = await check_node(settings.host)
-        await State.set("host_check", report)
+        report = await PeerService.check_node(settings.host)
+        await StateService.set("host_check", report)
         try:
             status, data, _ = await netcheck.get_json(settings.host, f"{HOST_API}/peers", 512 * 1024)
             if status == 200 and isinstance(data, dict):
                 for peer in (data.get("peers") or [])[:settings.max_peers]:
                     if isinstance(peer, dict) and isinstance(peer.get("url"), str):
-                        await Peers.remember(peer["url"], "host-reported", None, None)
-        except netcheck.CheckError as exc:
+                        await PeerService.remember(peer["url"], "host-reported", None, None)
+        except CheckError as exc:
             log_factory.warning(f"[peering] Reading the host's peer directory failed: {exc.code}")
 
     async def checkpoint_basis(self, day: str, moment: datetime) -> tuple[int, str, dict]:
@@ -77,14 +75,17 @@ class PeerRole(NodeRole):
         link = HostLink.snapshot()
         beat = link.get("last_heartbeat")
         age = (now - parse_ts(beat)).total_seconds() if beat else None
-        fresh = 100 if link.get("state") == "connected" and age is not None and age < settings.heartbeat_interval * 4 else 0
+        alive = link.get("state") == "connected" and age is not None and age < settings.heartbeat_interval * 4
+        fresh = 100 if alive else 0
         signals.append(Signal("heartbeat_fresh", "reachability", fresh if beat else None, 5, "normal", "local", beat,
                               None, detail={ "state": link.get("state"), "error": link.get("error") }))
 
         last = await FullSync.last_success()
         sync_age = (now - parse_ts(last.finished_at)).total_seconds() if last and last.finished_at else None
-        signals.append(Signal("full_sync_fresh", "integrity",
-                              None if sync_age is None else (100 if sync_age < FRESH_SYNC.total_seconds() else (50 if sync_age < 50 * HOUR else 10)),
+        if sync_age is None: fresh_sync = None
+        elif sync_age < FRESH_SYNC.total_seconds(): fresh_sync = 100
+        else: fresh_sync = 50 if sync_age < 50 * HOUR else 10
+        signals.append(Signal("full_sync_fresh", "integrity", fresh_sync,
                               15, "high", "local", last.finished_at if last else None, None,
                               detail={ "age_seconds": int(sync_age) if sync_age is not None else None }))
         runs = await FullSync.runs(14)
@@ -107,5 +108,5 @@ class PeerRole(NodeRole):
             "last_sync": {
                 "id": last.id, "finished_at": last.finished_at, "to_seq": last.to_seq, "root": last.local_root
             } if last else None,
-            "host_key": await State.get("host_key") or settings.host_key
+            "host_key": await StateService.get("host_key") or settings.host_key
         }

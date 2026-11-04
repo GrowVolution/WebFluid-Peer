@@ -1,0 +1,7 @@
+authlib>=1.9.1,<2
+certifi>=2026.10.18
+cryptography>=50.0.0,<51
+gitpython>=3.2.1,<4
+joserfc>=1.7.6,<2
+pyjwt>=2.15.0,<3
+urllib3>=2.8.0,<3

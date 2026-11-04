@@ -22,9 +22,27 @@ everything they must do identically: protocols, storage, verification, checkpoin
 
 ---
 
+## Why
+
+Trust in a host should not depend on the host. A peer is how anyone — a user, a company, another
+project — checks a WebFluid host independently, without writing a single line of verification code:
+it runs the same `wf-peering` implementation the host runs, so its verdict is comparable with every
+other peer's, and every improvement to the protocol reaches all peers with the next release.
+
+## For developers and agents
+
+- [.agents/SKILL.md](.agents/SKILL.md) — what a coding agent needs to work on the peer
+- The protocol, settings and public API are the `wf-peering` extension's contract (`CONTRACT.md` in
+  its repository); the host side is the `peering` Additive
+
+The app targets WebFluid `1.0.0rc1`: the app factory lives in `fluid/__init__.py`, `main.py` only
+starts it.
+
+---
+
 ## Running a peer
 
-Requirements: WebFluid `1.0.0b3` or newer and the `wf-peering` extension in the same environment:
+Requirements: WebFluid `1.0.0rc1` or newer and the `wf-peering` extension in the same environment:
 
 ```bash
 pip install -e ../wf-site/extensions/peering     # or: wf ocean install -e peering
@@ -55,7 +73,7 @@ class MyConfig:
     PEERING_HOST = "https://app.example.org"        # the host this peer watches
     PEERING_PUBLIC_URL = "https://peer.example.net" # where this peer is reachable
     # PEERING_HOST_KEY = "…"                        # pin the host key instead of trusting the first one
-    # PEERING_TRUSTED_REFERENCES = { "users_e2ee": "https://raw.githubusercontent.com/…/manifest.json" }
+    # PEERING_TRUSTED_REFERENCES = { "shop_checkout": "https://raw.githubusercontent.com/…/manifest.json" }
 ```
 
 `fluid/config.py` already trusts the published references of `users_e2ee` and `users_session` (users
@@ -126,13 +144,33 @@ The status page at `/` reads only this API.
 ## Tests
 
 ```bash
-pytest tests
+cd tests
+python -m pytest -q
 ```
 
 The tests run a copy of this app against a fake host (`tests/fakehost.py`) and the installed `wf-peering`:
 full and live sync, retries, schema mismatches, rewritten and truncated histories, a changed host key,
 artifact observations against format 1 and format 2 references, unserved records, node identity and TLS
 classification, trust, the path layout, and closing interrupted syncs.
+
+---
+
+## Verification
+
+Full syncs validate the signed head against `PEERING_HOST` before pinning a key. Hello statements
+also bind the host origin and timestamp. Malformed range pages fail with `INVALID_RANGE`; a page
+that cannot advance the local ledger fails with `RANGE_NO_PROGRESS` instead of looping forever.
+Host-ledger checkpoints must use the pinned host key. Verification remains in `wf-peering`.
+
+Only references independently configured in `PEERING_TRUSTED_REFERENCES` can yield `verified` or
+`outdated`. A host-supplied manifest remains visible as `origin: host-supplied`, but matching it yields
+`unreferenced`: a host cannot choose the evidence that independently authenticates its own code.
+Manifests reject duplicate versions, invalid hexadecimal digests and missing/unknown latest versions.
+Configure trusted URLs explicitly for artifacts you intend to endorse. Reference servers must
+support uncompressed HTTP responses. Protocol and schema versions remain unchanged.
+
+The image build upgrades runtime security dependencies through `constraints.txt`. Local installs
+can apply them with `python -m pip install --upgrade -r constraints.txt`.
 
 ---
 
