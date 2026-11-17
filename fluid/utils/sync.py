@@ -11,6 +11,7 @@ from wf_peering.settings import settings, HOST_API, HOST_SOCKET, PROTOCOL_VERSIO
 from wf_peering.utils import netcheck
 from wf_peering.utils.serialization import dumps, loads
 from datetime import datetime, timedelta, UTC
+from typing import Optional
 import asyncio, json, secrets, uuid
 
 from ..exceptions import SyncFailure
@@ -235,6 +236,34 @@ class FullSync:
         if cls._lock is None: cls._lock = asyncio.Lock()
         return cls._lock
 
+    @staticmethod
+    async def _compare_root(head: dict, signed: dict, target: int) -> str:
+        _, local_root = await LedgerService.root(target)
+        if local_root != head.get("root"):
+            await ConflictService.record(
+                "root-mismatch", "critical",
+                f"The host's signed root for {target} entries differs from the root of the verified copy.",
+                { "head": head, "signature": signed.get("signature"), "local_root": local_root },
+                subject="host", key={ "seq": target, "root": head.get("root") }
+            )
+            raise SyncFailure("ROOT_MISMATCH")
+        return local_root
+
+    @classmethod
+    async def check_root(cls) -> Optional[str]:
+        host_key = await pinned_host_key()
+        if host_key is None: return None
+        status, signed, _ = await netcheck.get_json(settings.host, f"{HOST_API}/ledger/head", 64 * 1024)
+        if status != 200 or not isinstance(signed, dict) or LedgerService.check_head(signed, origin=settings.host):
+            return None
+        head = signed["head"]
+        target = head.get("seq")
+        local, _ = await LedgerService.head()
+        if signed.get("key") != host_key or not isinstance(target, int) or not target or target != local: return None
+        try: await cls._compare_root(head, signed, target)
+        except SyncFailure as failure: return failure.code
+        return "ok"
+
     @classmethod
     async def _attempt(cls) -> dict:
         host_key = await pinned_host_key()
@@ -291,18 +320,10 @@ class FullSync:
             local, _ = await LedgerService.head()
             if local <= previous: raise SyncFailure("RANGE_NO_PROGRESS")
 
-        _, local_root = await LedgerService.root(target)
         stored = await LedgerService.get(target) if target else None
         if target and (stored is None or stored.hash != head.get("hash")):
             raise SyncFailure("HEAD_HASH_MISMATCH", detail={ "seq": target })
-        if local_root != head.get("root"):
-            await ConflictService.record(
-                "root-mismatch", "critical",
-                f"The host's signed root for {target} entries differs from the root of the verified copy.",
-                { "head": head, "signature": signed.get("signature"), "local_root": local_root },
-                subject="host", key={ "seq": target, "root": head.get("root") }
-            )
-            raise SyncFailure("ROOT_MISMATCH")
+        local_root = await cls._compare_root(head, signed, target)
 
         report = await LedgerService.verify(host_key, target)
         if not report["valid"]:

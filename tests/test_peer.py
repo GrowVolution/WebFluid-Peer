@@ -131,6 +131,22 @@ async def test_rewritten_history_is_detected_as_equivocation(host):
     assert (await LedgerService.head())[0] == 4
 
 
+async def test_a_signed_root_against_the_verified_copy_is_caught_between_full_syncs(host):
+    from fluid.utils.sync import FullSync
+    from wf_peering.protocol import entries
+    await FullSync.run("full")
+    assert await FullSync.check_root() == "ok"
+    forged = dict(host.head()["head"], root="0" * 64)
+    host.override_head = { "head": forged, "key": host.signer.public_key, "signer": host.signer.fingerprint,
+                           "signature": host.signer.sign(entries.HEAD_CONTEXT, forged) }
+    try:
+        assert await FullSync.check_root() == "ROOT_MISMATCH"
+    finally:
+        host.override_head = None
+    found = await conflicts("root-mismatch")
+    assert found and found[0]["severity"] == "critical" and found[0]["evidence"]["head"]["root"] == "0" * 64
+
+
 async def test_truncated_history_is_reported(host):
     from fluid.utils.sync import FullSync
     snapshot = list(host.items)

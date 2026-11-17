@@ -16,7 +16,7 @@ everything they must do identically: protocols, storage, verification, checkpoin
 | `utils/sync.py`                    | `HostLink`: the WebSocket to `/peering/ws/peer` with live replication; `FullSync`: the daily full sync over the host API with root comparison. |
 | `utils/observe.py`                 | Fetches every published artifact from the host and checks it against the host's claim and the trusted reference. |
 | `utils/role.py`                    | `PeerRole`: checkpoint basis, checkpoint publication, peer-only trust signals, status. |
-| `jobs.py`                          | Observation interval and the daily full sync (23:59 UTC by default).                   |
+| `jobs.py`                          | Observation interval, the signed-root check against the verified copy every `PEERING_INTEGRITY_INTERVAL`, and the daily full sync (23:59 UTC by default). |
 | `api/`                             | The public API under `/api/v1` (shared handlers from `wf-peering`, plus `/sync` and `/integrity/observations`). |
 | `app/`                             | The status page at `/`.                                                                |
 
