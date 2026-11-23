@@ -1,0 +1,28 @@
+{% extends "net/base.html" %}
+{% block title %}{{ _("NET_IMPRINT_HEADING") }}{% endblock %}
+{% block main %}
+<article class="card prose">
+    <h1>{{ _("NET_IMPRINT_HEADING") }}</h1>
+    {% set o = legal.operator %}
+    {% if o.provisions %}<p class="muted">{{ _("NET_IMPRINT_PROVISIONS", provisions=o.provisions | join(", ")) }}</p>{% endif %}
+    {% if o.name %}
+    <h2>{{ _("NET_IMPRINT_PROVIDER") }}</h2>
+    <p>{{ o.name }}{% if o.legal_form %} ({{ o.legal_form }}){% endif %}{% for line in o.address or [] %}<br>{{ line }}{% endfor %}</p>
+    {% endif %}
+    {% if o.representatives %}<h2>{{ _("NET_IMPRINT_REPRESENTED") }}</h2><p>{{ o.representatives | join(", ") }}</p>{% endif %}
+    {% if o.email or o.phone or o.contact_form %}
+    <h2>{{ _("NET_IMPRINT_CONTACT") }}</h2>
+    <p>{% if o.email %}{{ _("NET_IMPRINT_EMAIL") }}: <a href="mailto:{{ o.email }}">{{ o.email }}</a>{% endif %}{% if o.phone %}<br>{{ _("NET_IMPRINT_PHONE") }}: {{ o.phone }}{% endif %}{% if o.contact_form %}<br>{{ _("NET_IMPRINT_FORM") }}: <a href="{{ o.contact_form }}">{{ o.contact_form }}</a>{% endif %}</p>
+    {% endif %}
+    {% if o.register %}<h2>{{ _("NET_IMPRINT_REGISTER") }}</h2><p>{{ _("NET_IMPRINT_REGISTER_LINE", court=o.register.court, number=o.register.display) }}</p>{% endif %}
+    {% if o.capital %}<p>{{ _("NET_IMPRINT_CAPITAL") }}: {{ o.capital }}{% if o.outstanding %} · {{ _("NET_IMPRINT_OUTSTANDING") }}: {{ o.outstanding }}{% endif %}</p>{% endif %}
+    {% if o.vat_id %}<p>{{ _("NET_IMPRINT_VAT") }}: {{ o.vat_id }}</p>{% endif %}
+    {% if o.economic_id %}<p>{{ _("NET_IMPRINT_ECONOMIC") }}: {{ o.economic_id }}</p>{% endif %}
+    {% if o.supervisory_authority %}<h2>{{ _("NET_IMPRINT_AUTHORITY") }}</h2><p>{{ o.supervisory_authority }}</p>{% endif %}
+    {% if o.profession %}<h2>{{ _("NET_IMPRINT_PROFESSION") }}</h2><p>{{ _("NET_IMPRINT_PROFESSION_LINE", title=o.profession.title, state=o.profession.state, chamber=o.profession.chamber, rules=o.profession.rules) }}</p>{% endif %}
+    {% if o.in_liquidation %}<p>{{ _("NET_IMPRINT_LIQUIDATION") }}</p>{% endif %}
+    {% if o.editorial %}<h2>{{ _("NET_IMPRINT_EDITORIAL") }}</h2><p>{{ o.editorial.name }}{% for line in o.editorial.address or [] %}<br>{{ line }}{% endfor %}</p>{% endif %}
+    <p class="muted">{{ _("NET_IMPRINT_SERVICE") }}</p>
+    <p class="muted">{{ _("NET_IMPRINT_MACHINE") }} <a href="/api/v1/net/operator"><code>/api/v1/net/operator</code></a></p>
+</article>
+{% endblock %}

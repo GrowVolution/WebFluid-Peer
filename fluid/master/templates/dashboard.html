@@ -1,0 +1,74 @@
+{% extends "net/base.html" %}
+{% block head %}<script src="{{ assets }}/js/dashboard.js?v={{ version }}" defer></script>{% endblock %}
+{% block main %}
+<section class="card" aria-labelledby="apps-heading">
+    <h1 id="apps-heading">{{ _("NET_DASH_HEADING") }}</h1>
+    <p class="muted">{{ _("NET_DASH_INTRO") }}</p>
+    <form id="search" class="search" role="search" action="/" method="get">
+        <label for="q">{{ _("NET_DASH_SEARCH") }}</label>
+        <input id="q" name="q" type="search" autocomplete="off" maxlength="64" value="{{ query }}">
+        <label class="check"><input id="inactive" name="inactive" type="checkbox" value="1" {% if inactive %}checked{% endif %}> {{ _("NET_DASH_INACTIVE") }}</label>
+    </form>
+    <noscript><p class="notice">{{ _("NET_UI_NOSCRIPT") }}</p></noscript>
+    <p id="summary" class="muted" aria-live="polite">{{ _("NET_DASH_RESULTS", total=results.total, page=results.page, pages=results.pages) }}</p>
+    <p id="stale" class="notice" hidden></p>
+    <div class="table-wrap">
+        <table class="results">
+            <thead><tr>
+                <th scope="col">{{ _("NET_COL_APP") }}</th><th scope="col">{{ _("NET_COL_ORIGIN") }}</th>
+                <th scope="col">{{ _("NET_COL_NAME") }}</th><th scope="col">{{ _("NET_COL_STATUS") }}</th>
+                <th scope="col">{{ _("NET_COL_SEEN") }}</th><th scope="col">{{ _("NET_COL_HEAD") }}</th>
+            </tr></thead>
+            <tbody id="rows">
+            {% for item in results["items"] %}
+                <tr><td><a href="/apps/{{ item.app }}">{{ item.app }}</a></td><td>{{ item.origin or "–" }}</td><td>{{ item.name or "–" }}</td>
+                <td>{{ _("NET_ACTIVE") if item.active else _("NET_INACTIVE") }}</td><td>{{ item.last_seen or "–" }}</td><td>{{ item.head.seq if item.head else "–" }}</td></tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    <p id="empty" class="empty" {% if results["items"] %}hidden{% endif %}>{{ _("NET_DASH_EMPTY") }}</p>
+    <nav class="pager" aria-label="{{ _("NET_DASH_HEADING") }}">
+        <button type="button" id="prev">{{ _("NET_DASH_PREV") }}</button>
+        <button type="button" id="next">{{ _("NET_DASH_NEXT") }}</button>
+    </nav>
+</section>
+<section class="card" aria-labelledby="network-heading">
+    <h2 id="network-heading">{{ _("NET_NET_HEADING") }}</h2>
+    <dl class="kv">
+        <dt>{{ _("NET_NET_ID") }}</dt><dd><code>{{ status.network or "–" }}</code></dd>
+        <dt>{{ _("NET_NET_PRIMARY") }}</dt><dd><code>{{ status.primary or "–" }}</code></dd>
+        <dt>{{ _("NET_NET_ANCHOR") }}</dt><dd>{{ status.anchor or "–" }}</dd>
+        <dt>{{ _("NET_NET_POLICY") }}</dt><dd>{% if status.policy %}{{ _("NET_DAYS", days=status.policy.inactive_days) }} · min. {{ status.policy.min_groups }}{% else %}–{% endif %}</dd>
+        <dt>{{ _("NET_NET_MEMBERS") }}</dt><dd>{% for role, count in (status.members or {}).items() %}{{ role }}: {{ count }}{% if not loop.last %} · {% endif %}{% endfor %}</dd>
+        <dt>{{ _("NET_NET_MASTERS") }}</dt><dd>{{ trust.masters }} · {{ trust.reachable }}</dd>
+        <dt>{{ _("NET_NET_DECLARED") }}</dt><dd>{{ trust.declared }}</dd>
+        <dt>{{ _("NET_NET_GROUPS") }}</dt><dd>{{ trust.groups }}</dd>
+        <dt>{{ _("NET_NET_UNASSIGNED") }}</dt><dd>{{ trust.unassigned }}</dd>
+        <dt>{{ _("NET_NET_CHAIN") }}</dt><dd>{{ (status.chain or {}).height or 0 }}</dd>
+        <dt>{{ _("NET_NET_CONFLICTS") }}</dt><dd>{{ trust.conflicts }}</dd>
+    </dl>
+</section>
+<section class="card" aria-labelledby="masters-heading">
+    <h2 id="masters-heading">{{ _("NET_MASTERS_HEADING") }}</h2>
+    <p class="muted">{{ _("NET_MASTERS_INTRO") }}</p>
+    <div class="table-wrap">
+        <table class="results">
+            <thead><tr>
+                <th scope="col">{{ _("NET_COL_NODE") }}</th><th scope="col">{{ _("NET_COL_URL") }}</th>
+                <th scope="col">{{ _("NET_COL_OPERATOR") }}</th><th scope="col">{{ _("NET_COL_BASIS") }}</th>
+                <th scope="col">{{ _("NET_COL_DECLARED") }}</th>
+            </tr></thead>
+            <tbody>
+            {% for item in trust.operators %}
+                <tr><td><code>{{ item.node }}</code>{% if item.primary %} · {{ _("NET_UI_ROLE_PRIMARY") }}{% endif %}</td>
+                <td>{% if item.url %}<a href="{{ item.url }}" rel="noopener">{{ item.url }}</a>{% else %}–{% endif %}</td>
+                <td>{{ item.name or "–" }}{% if item.country %} ({{ item.country }}){% endif %}</td>
+                <td>{% if item.basis %}{{ _("NET_BASIS_" ~ (item.basis | upper)) }}{% elif item.reason %}<code>{{ item.reason }}</code>{% else %}–{% endif %}</td>
+                <td>{% if item.declared_at %}#{{ item.seq }} · {{ item.declared_at }}{% else %}–{% endif %}</td></tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</section>
+{% endblock %}

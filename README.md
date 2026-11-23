@@ -1,143 +1,249 @@
 # peering
 
-> A WebFluid app — an independent peer of a WebFluid host.
+> A WebFluid app — a master or a peer of a WebFluid peering network.
 
-A peer watches one host from the outside. It replicates the host's signed ledger, checks every entry,
-key change and signed user action itself, fetches the scripts the host actually serves and compares them
-with the published references, signs a daily checkpoint and assesses how far the host can be trusted.
-Its results are public, so users, other peers and the users SDK can compare them.
+A peering network checks WebFluid applications from the outside so that nobody has to trust an
+application's operator — the network does not even trust its own operators. This app is the node that
+forms and serves the network:
 
-This is a plain WebFluid main app. It runs **without Additives** (`WF_ADDITIVES` stays off) and is the
-complement of the `peering` Additive, which only runs on the host. Both use the `wf-peering` extension for
-everything they must do identically: protocols, storage, verification, checkpoints and the trust score.
+| Started as           | Configuration                                         | Does                                                                                                   |
+|----------------------|-------------------------------------------------------|--------------------------------------------------------------------------------------------------------|
+| **Primary master**   | `IS_MASTER = True`, `JOIN_MASTER = None`              | Founds the network (genesis, network id), sets its policy, sequences the event chain, admits members, serves the dashboard, the API and its legal pages. |
+| **Secondary master** | `IS_MASTER = True`, `JOIN_MASTER = "<master URL>"`    | Joins an existing network through any master, verifies and replicates everything itself, admits members, witnesses blocks, serves its own dashboard and legal pages. |
+| **Default peer**     | `IS_MASTER = False` (default), `JOIN_MASTER = "<URL>"` | Joins through exactly one master and only makes outbound connections: replicates applications itself and sends signed observations through its master. No public URL, no UI, no join endpoint. |
 
-| This app (`fluid/`)                | Job                                                                                    |
-|------------------------------------|----------------------------------------------------------------------------------------|
-| `utils/sync.py`                    | `HostLink`: the WebSocket to `/peering/ws/peer` with live replication; `FullSync`: the daily full sync over the host API with root comparison. |
-| `utils/observe.py`                 | Fetches every published artifact from the host and checks it against the host's claim and the trusted reference. |
-| `utils/role.py`                    | `PeerRole`: checkpoint basis, checkpoint publication, peer-only trust signals, status. |
-| `jobs.py`                          | Observation interval, the signed-root check against the verified copy every `PEERING_INTEGRITY_INTERVAL`, and the daily full sync (23:59 UTC by default). |
-| `api/`                             | The public API under `/api/v1` (shared handlers from `wf-peering`, plus `/sync` and `/integrity/observations`). |
-| `app/`                             | The status page at `/`.                                                                |
+Applications take part with the `peering` Additive (`PEERING_MASTER_URL`). Everything the roles must
+do identically — protocols, verification, the verdict, the client — comes from the `wf-peering`
+extension; its `PROTOCOL.md` is the normative wire protocol.
+
+| This app (`fluid/`)    | Job                                                                                                 |
+|------------------------|-----------------------------------------------------------------------------------------------------|
+| `utils/topology.py`    | Resolves `IS_MASTER`/`JOIN_MASTER` into primary, secondary or peer — and fails clearly on bad values. |
+| `utils/network.py`     | Founding and restoring the genesis, the primary's policy, challenges, join admission, request authentication. |
+| `utils/store.py`       | The store of signed network objects: verification and authorization on receipt, paging for sync.  |
+| `utils/link.py`        | Join with backoff, paged sync from masters, submitting a peer's attestations.                      |
+| `utils/apps.py`        | Application registry, sightings, replication from the application's origin, attestations, evidence bundles, search, retention. |
+| `utils/chain.py`       | The event chain: submissions, blocks (primary), witnesses (secondaries), receipts.                 |
+| `utils/legacy.py`      | Import of a former peer database's verified host ledger and the legacy export.                     |
+| `utils/legal.py`       | The data-flow matrix behind the privacy policy and the role-dependent check of the operator data.  |
+| `api/`, `app/`         | `/api/health`, `/api/v1/status` on every node; the network API, dashboard, `/imprint` and `/privacy` on masters only. |
 
 ---
 
 ## Why
 
-Trust in a host should not depend on the host. A peer is how anyone — a user, a company, another
-project — checks a WebFluid host independently, without writing a single line of verification code:
-it runs the same `wf-peering` implementation the host runs, so its verdict is comparable with every
-other peer's, and every improvement to the protocol reaches all peers with the next release.
+Trust in an application should not depend on its operator. A network of independently operated
+masters and peers checks what every application publishes — its signed history, the files it serves,
+the key changes of its users — and every client recomputes the verdict from the signed raw evidence
+with an assignment of signers to operators it chooses itself.
 
 ## For developers and agents
 
-- [.agents/SKILL.md](.agents/SKILL.md) — what a coding agent needs to work on the peer
-- The protocol, settings and public API are the `wf-peering` extension's contract (`CONTRACT.md` in
-  its repository); the host side is the `peering` Additive
-
-The app targets WebFluid `1.0.0rc1`: the app factory lives in `fluid/__init__.py`, `main.py` only
-starts it.
+- [.agents/SKILL.md](.agents/SKILL.md) — what a coding agent needs to work on this app
+- The `wf-peering` extension: `PROTOCOL.md` (wire protocol), `CONTRACT.md` (settings, building blocks)
 
 ---
 
-## Running a peer
+## Minimal configurations
 
-Requirements: WebFluid `1.0.0rc1` or newer and the `wf-peering` extension in the same environment:
+All values are Python class attributes in `fluid/_my_config.py` (gitignored); `None` means Python `None`.
+These keys are not read from `.ini` files. `JOIN_MASTER` defaults to `"https://peers.webfluid.dev"`, so
+`IS_MASTER = True` alone makes a secondary of that network and only an explicit `JOIN_MASTER = None`
+founds a network. A default peer with `JOIN_MASTER = None`, `""` or an invalid origin refuses to start
+with a message naming the key.
 
-```bash
-pip install -e ../wf-site/extensions/peering     # or: wf ocean install -e peering
-```
-
-`app_configs/main.ini` (`main.example.ini` is the template):
-
-```ini
-[general]
-SECRET_KEY = <random>
-
-[extensions]
-EXT_SQLALCHEMY = 1
-EXT_SCHEDULING = 1
-EXT_BABEL = 1
-
-[features]
-WF_PROCESSING = 1
-
-[data]
-DATABASE_URI = sqlite:///main.db
-```
-
-`fluid/_my_config.py` (gitignored) overrides the defaults in `fluid/config.py`:
+**Primary master**
 
 ```python
 class MyConfig:
-    PEERING_HOST = "https://app.example.org"        # the host this peer watches
-    PEERING_PUBLIC_URL = "https://peer.example.net" # where this peer is reachable
-    # PEERING_HOST_KEY = "…"                        # pin the host key instead of trusting the first one
-    # PEERING_TRUSTED_REFERENCES = { "shop_checkout": "https://raw.githubusercontent.com/…/manifest.json" }
+    IS_MASTER = True
+    JOIN_MASTER = None
+    PEERING_PUBLIC_URL = "https://peers.example.org"
+    NETWORK_NAME = "example"
+    LEGAL = { ... }                      # see "Operator information" below
 ```
 
-`fluid/config.py` already trusts the published references of `users_e2ee` and `users_session` (users
-integrity repository) and of `ocean_integrity` (ocean integrity repository); both repositories publish a
-format 2 manifest that lists several artifacts. The status page is translated on the server, so the app
-needs `EXT_BABEL`; `fluid/config.py` offers English and German.
+After the first start the log names the network id; set `PEERING_NETWORK_ANCHOR = "n1.…"` then, so a
+lost database can never found a new network silently.
 
-```bash
-wf migrate init main && wf migrate revision main && wf migrate upgrade main
-wf run main -p 8001
+**Secondary master**
+
+```python
+class MyConfig:
+    IS_MASTER = True
+    JOIN_MASTER = "https://peers.example.org"      # any master of the network
+    PEERING_PUBLIC_URL = "https://peers2.example.net"
+    PEERING_NETWORK_ANCHOR = "n1.…"                # optional: refuse any other network
+    LEGAL = { ... }
 ```
 
-### With Docker
+**Default peer** (with `app_configs/peer.example.ini`: `WF_PROCESSING = 0`)
 
-The `Dockerfile` extends the WebFluid image with `wf-peering`; `docker-compose.yaml` is an example stack
-for a Swarm behind Traefik that mounts the checkout as `/app` and starts the app `main` on port 8000. Set
-the router rule to the peer's own domain — the one in `PEERING_PUBLIC_URL`.
+```python
+class MyConfig:
+    JOIN_MASTER = "https://peers2.example.net"
+```
 
-For local development, run the host and the peer with `-d`: in debug mode `wf-peering` allows `http` and
-local addresses (the defaults in `fluid/config.py` point at `http://localhost:8000` and `:8001`) and leaves
-HTTPS out of the trust assessment, so nothing fails with `HTTPS_REQUIRED`. The signed reports and the status
-page say that the node runs in debug mode.
+**Application** (WebFluid app with the `peering` Additive)
 
-`PEERING_HOST` must be exactly the origin the host signs (its `PEERING_PUBLIC_URL`, by default its
-`BASE_URL`) and the address browsers and apps use for it. A different spelling of the same server — a LAN
-address instead of `localhost` — makes the peer report the host's identity as `URL_MISMATCH`, and clients
-don't count the peer as confirming the host they visit.
+```python
+class Config:
+    PEERING_MASTER_URL = "https://peers2.example.net"
+```
 
-The host checks `PEERING_PUBLIC_URL` when the peer connects: it fetches `<PEERING_PUBLIC_URL>/api/v1/node`
-and refuses the connection (`URL_UNREACHABLE`, `URL_NOT_VERIFIED`) unless this peer answers there. The
-address therefore has to be reachable from the host, and the browsers and apps that check the host fetch
-it too.
+The policy of the network — inactivity period (`PEERING_INACTIVE_DAYS`, default 30), maximal age of
+attestations and the number of independent operator groups for *witnessed* — is set only on the
+primary and replicated as signed objects; the same keys on a secondary have no effect.
+`PEERING_OPERATORS` (`{group: [node ids or keys]}`) is the operator assignment this master uses for
+the verdicts it displays; it is labelled as this operator's view.
 
-To test with a phone in the LAN, start the host with `-d -h 0.0.0.0` and `BASE_URL` set to the computer's
-LAN address, and this peer with `-d -h 0.0.0.0`, `PEERING_HOST` set to that address and
-`PEERING_PUBLIC_URL` to the LAN address of this peer (`http://<lan-ip>:8001`) — `localhost` would point the
-phone at itself. A browser on the same computer then opens the host on `localhost`; in debug mode it treats
-that page as an alias of `BASE_URL`. Peers and host on one computer share a network and are therefore never
-counted as independent of each other, so the trust check stays *unclear* in that setup by design.
+`PEERING_TRUSTED_REFERENCES` (`{artifact id: manifest URL}`) names the reference manifests this node
+trusts; only these make an observation `verified`, a manifest the application names itself stays
+`unreferenced`. Each URL must address a full commit id (40 or 64 hex characters as a path segment),
+for example the peering verifier of a published release:
 
-A freshly started peer observes the host's scripts 30 seconds after the start instead of after the first
-`PEERING_INTEGRITY_INTERVAL`, and runs a full sync a minute after the start when its last successful sync is
-missing or older than 26 hours. A sync that was still running when the process ended is closed as
-`INTERRUPTED` at the next start.
+```python
+class Config:
+    PEERING_TRUSTED_REFERENCES = {
+        "peering_verifier": "https://raw.githubusercontent.com/GrowVolution/WF_peering/<commit>/integrity/manifest.json"
+    }
+```
 
-The node key is created in `keys/node.key` (gitignored, mode `0600`) on first start, or taken from
-`PEERING_NODE_KEY`. Losing it gives the peer a new identity; other nodes record that as a key change.
-
-A peer is only as independent as its infrastructure: run it on a different provider, network and domain
-than the host, and do not reuse the host's TLS certificate. The trust assessment detects shared /24 or /48
-networks, registrable domains and certificate keys and counts such observers as one.
+A branch or tag can move, so outside debug mode such a URL is not fetched and the observation
+reports `REFERENCE_NOT_PINNED` (`unreferenced`); debug mode accepts it for development. Allowed hosts
+are `PEERING_REFERENCE_HOSTS` (default `raw.githubusercontent.com`).
 
 ---
 
-## What it publishes
+## Running a node
 
-`GET /api/v1/…` — the same read-only API as the host (see the `wf-peering` README), answered from the peer's
-own verified copy: `/node`, `/status`, `/ledger…`, `/accounts/{handle}`, `/integrity`, `/hash?id=` (with the
-peer's own `observation`), `/checkpoints…`, `/peers`, `/trust`, `/conflicts`, plus:
+Requirements: WebFluid `1.0.0rc1` and the `wf-peering` extension from its checkout:
 
-- `GET /api/v1/sync` — next full sync and checkpoint, recent sync runs, state of the host link.
-- `GET /api/v1/integrity/observations` — what the peer actually downloaded from the host.
+```bash
+pip install -e ../wf-site/extensions/peering
+wf migrate init main && wf migrate revision main -a && wf migrate upgrade main
+wf run main -p 8001
+```
 
-The status page at `/` reads only this API.
+Masters use `app_configs/master.example.ini`, default peers `app_configs/peer.example.ini`. The node
+key is created in `keys/node.key` (mode `0600`); a primary also writes `keys/genesis.json` next to it.
+Keep both in your backups: a primary that loses its database restores the binding from
+`genesis.json`; one that loses its key cannot sign as primary again — the network stays with the old
+id and the secondaries keep it.
+
+**Master outage.** Secondaries keep the network, admit members and accept events, which stay
+*submitted* until the primary is back and orders them. A secondary never founds a network; an
+unreachable upstream is retried.
+
+**Changing the entry master** inside the same network keeps identity and history. Another network
+needs an explicit rebinding (`PEERING_NETWORK_ANCHOR` set to the new id).
+
+### With Docker
+
+`docker-compose.yaml` holds two example services: `master` behind Traefik with a public router, and
+`peer` without any Traefik label, published port or public URL. The `Dockerfile` installs `wf-peering`
+from PyPI; until the extension version in this working tree is released, install it from the checkout
+instead (mount it and `pip install -e`).
+
+### Local multi-node demo
+
+The integration test starts a complete network in separate processes with their own keys and
+databases — a primary, a secondary, a secondary that joins through the secondary, a default peer on an
+unknown port and two applications with the real `peering` Additive:
+
+```bash
+cd tests
+PEERING_E2E=1 python -m pytest -q integration/test_network_e2e.py
+```
+
+`PEERING_E2E_KEEP=1` keeps the folders (logs in `node.log`) under the temp directory. The test checks
+formation and convergence, the inventory of a default peer (`/api/health`, `/api/v1/status` only), a
+verdict recomputed from raw evidence in Python and in the browser verifier, the separation of two
+applications, a receipt witnessed by two masters, a primary outage without re-founding and an
+unreachable upstream that never founds.
+
+---
+
+## Checking an application yourself
+
+1. Obtain a master URL and the network id from a source you trust, not from the application.
+2. Fetch `GET <master>/api/v1/apps/<app id>/evidence`. It contains only signed objects: genesis,
+   policies, admissions, the application's heads, attestations, sightings and consistency proofs.
+3. Evaluate it with your anchor and your operator assignment — in Python
+   `wf_peering.protocol.evidence.evaluate(bundle, anchor, operators)`, in a native client the users SDK's
+   `NetworkEvidence.verifyApp`, in a browser outside the application `verifier.evaluate`. All three
+   reproduce the shared vectors of `wf-peering`.
+
+The master's dashboard (`/`, `/apps/<id>`) shows the same verdict computed by that master with its
+operator's assignment, plus the raw evidence link.
+
+---
+
+## Operator information
+
+Masters render `/imprint`, `/privacy` and the machine-readable operator statement
+`GET /api/v1/net/operator` from `LEGAL`; default peers serve none of them. Without complete information
+a master refuses to start outside debug mode (`LEGAL: incomplete …` names every missing field); in
+debug mode the pages show what is missing. Conditional fields are only required when their condition
+applies (the validation names them).
+
+```python
+LEGAL = {                                                  # example values — replace every one
+    "operator": {
+        "name": "Beispiel Peering e.V.", "form": "association",   # natural_person, sole_trader, company, association, public_body
+        "country": "DE",                                   # ISO 3166-1 alpha-2 of the establishment
+        "commercial": False,                               # True: geschäftsmäßig, in der Regel gegen Entgelt → § 5 DDG
+        "registered": True,                                # companies always; then "register" is required
+        "register": { "court": "Amtsgericht Musterstadt", "type": "VR", "number": "VR 12345" },
+        "representatives": ["Erika Beispiel (Vorsitz)"],   # required for company, association, public_body
+        "address": ["Musterweg 1", "12345 Musterstadt", "Deutschland"],
+        "email": "kontakt@example.org", "contact_form": "https://example.org/kontakt",
+        # optional: "legal_form" (required for companies), "phone", "vat_id", "economic_id", "capital",
+        # "outstanding", "permit_required" + "supervisory_authority", "profession", "in_liquidation",
+        # "journalistic" + "editorial" {"name", "address"} (§ 18 Abs. 2 MStV)
+    },
+    "privacy": {
+        "legal_basis": "art6_1_f",                         # the operator confirms the documented assessment
+        "controller_email": "datenschutz@example.org",
+        "hosting": "Example Hosting GmbH, data centre in Germany, processing on our behalf (Art. 28 GDPR)",
+        "proxy_logs_days": 7, "backups_days": 14,          # 0 / None when not kept
+        "supervisory_authority": "…",
+        "transfers": False,                                # False = the operator transfers nothing itself; or a text with the safeguards
+        "dpo": False,                                      # False = none appointed; or {"name", "email"}
+        # outside the EU/EEA: "representative": {"name", "address"} or "representative_exempt": True (Art. 27(2) GDPR)
+        # optional: "controller": {...}, "joint": "...", "updated": "..."
+    }
+}
+```
+
+The imprint names the provisions it follows (`§ 5 DDG` only for `commercial` operators, `§ 18 Abs. 1
+MStV` always, `§ 18 Abs. 2 MStV` with an editorial). `/api/v1/net/operator` returns the public imprint
+fields (`fields.imprint`: name, form, legal form, address, country, contact data, representatives,
+register, VAT/economic id, capital, supervisory authority, profession, liquidation, editorial,
+provisions — never the `privacy` section or deployment values), their SHA-256 and the master's signed
+operator declaration. Only the declaration is replicated to the network: name, form, country and the
+register entry, VAT and economic identification number (`fields.replicated`), plus the imprint digest.
+Clients use it to count distinguishable operators without a manual list; a master that copies another
+organisation's register number only merges into that organisation's group. Publish every identifier
+you have — a master that names only its VAT number and one that names only the register entry of the
+same company count as two operators.
+
+The operator must confirm the facts the texts rest on: who runs the node and in which legal form,
+whether `§ 5 DDG` applies (geschäftsmäßige digitale Dienste) or only `§ 18 MStV`, the hosting set-up
+and whether the reverse proxy logs, backup periods, the competent supervisory authority, known
+third-country transfers and whether arrangements with other operators exist. The privacy policy
+follows the data-flow matrix in `fluid/utils/legal.py`; the site sets no cookies and uses no local
+storage.
+
+---
+
+## Former peer databases
+
+A peer of the former host–peer topology kept a verified copy of one host's ledger. At startup the app
+imports it once, after verifying every entry against the pinned host key, as the replica of the
+application `app1.<hash of that key>` (`peering_state` → `legacy_migration`). A failed verification
+imports nothing; the legacy tables stay untouched. `LegacyMigration.export(path)` writes the rest
+(sync runs, observations, legacy checkpoints, conflicts) as readable JSON.
 
 ---
 
@@ -148,32 +254,13 @@ cd tests
 python -m pytest -q
 ```
 
-The tests run a copy of this app against a fake host (`tests/fakehost.py`) and the installed `wf-peering`:
-full and live sync, retries, schema mismatches, rewritten and truncated histories, a changed host key,
-artifact observations against format 1 and format 2 references, unserved records, node identity and TLS
-classification, trust, the path layout, and closing interrupted syncs.
-
----
-
-## Verification
-
-Full syncs validate the signed head against `PEERING_HOST` before pinning a key. Hello statements
-also bind the host origin and timestamp. Malformed range pages fail with `INVALID_RANGE`; a page
-that cannot advance the local ledger fails with `RANGE_NO_PROGRESS` instead of looping forever.
-Host-ledger checkpoints must use the pinned host key. Verification remains in `wf-peering`.
-
-Only references independently configured in `PEERING_TRUSTED_REFERENCES` can yield `verified` or
-`outdated`. A host-supplied manifest remains visible as `origin: host-supplied`, but matching it yields
-`unreferenced`: a host cannot choose the evidence that independently authenticates its own code.
-Manifests reject duplicate versions, invalid hexadecimal digests and missing/unknown latest versions.
-Configure trusted URLs explicitly for artifacts you intend to endorse. Reference servers must
-support uncompressed HTTP responses. Protocol and schema versions remain unchanged.
-
-The image build upgrades runtime security dependencies through `constraints.txt`. Local installs
-can apply them with `python -m pip install --upgrade -r constraints.txt`.
+In-process tests of a primary (topology resolution, founding, join rules, replay and audience checks,
+inactivity at the exact boundary, policy, chain, evidence, search, dashboard and legal pages, legacy
+import). The multi-process test runs with `PEERING_E2E=1` (see above).
 
 ---
 
 ## License
 
-[GNU General Public License v3.0](LICENSE)
+The WebFluid Peer application is maintained by **GrowVolution e.V.** and released under the
+[GNU General Public License v3.0](LICENSE).

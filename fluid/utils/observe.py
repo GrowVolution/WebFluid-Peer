@@ -1,40 +1,16 @@
-from webfluid.core.ext import db
-from webfluid.utils.logging import factory as log_factory
-from sqlalchemy import select
 from wf_peering.exceptions import CheckError
-from wf_peering.models.integrity import Observation
 from wf_peering.protocol import integrity as spec
-from wf_peering.protocol.entries import utc_now
-from wf_peering.services import ConflictService
 from wf_peering.settings import settings
 from wf_peering.utils import netcheck
-from wf_peering.utils.serialization import dumps
-import hashlib, json
+from urllib.parse import urlsplit
+import hashlib, json, re
+
+MAX_ARTIFACTS = 32
+PINNED = re.compile(r"/(?:[0-9a-f]{40}|[0-9a-f]{64})/.")
 
 
 def _digest(algorithm: str, data: bytes) -> str:
     return hashlib.new(algorithm, data).hexdigest()
-
-
-async def _escalate(outcome: dict):
-    status = outcome["status"]
-    artifact = outcome["artifact"]
-    if status == "served-mismatch":
-        await ConflictService.record("artifact-served-mismatch", "critical",
-                               f"The host serves {artifact} with a hash that differs from its own integrity claim.",
-                               outcome, subject=f"artifact:{artifact}",
-                               key={ "claimed": outcome.get("claimed"), "observed": outcome.get("observed") })
-    elif status == "reference-mismatch":
-        await ConflictService.record("artifact-reference-mismatch", "critical",
-                               f"{artifact} does not match any version of its trusted reference.",
-                               outcome, subject=f"artifact:{artifact}",
-                               key={ "observed": outcome.get("observed") or outcome.get("claimed") })
-    elif status == "outdated":
-        await ConflictService.record("artifact-outdated", "high",
-                               f"The host serves {artifact} {outcome.get('served_version')} while "
-                               f"{outcome.get('latest_version')} is the latest published version.",
-                               outcome, subject=f"artifact:{artifact}",
-                               key={ "served": outcome.get("served_version"), "latest": outcome.get("latest_version") })
 
 
 def parse_manifest(data: bytes, artifact: str | None = None) -> dict | None:
@@ -52,7 +28,7 @@ def parse_manifest(data: bytes, artifact: str | None = None) -> dict | None:
     else:
         entry, name = manifest, manifest.get("artifact")
     if not isinstance(entry, dict) or not isinstance(entry.get("versions"), list): return None
-    versions = {}
+    versions, served = {}, {}
     for item in entry["versions"]:
         if not isinstance(item, dict): continue
         version, value = item.get("version"), item.get(algorithm) or item.get("hash")
@@ -61,9 +37,13 @@ def parse_manifest(data: bytes, artifact: str | None = None) -> dict | None:
             return None
         if version in versions: return None
         versions[version] = value.lower()
+        http = item.get("http")
+        if isinstance(http, dict) and isinstance(http.get(algorithm), str) \
+                and len(http[algorithm]) == spec.ALGORITHMS[algorithm]:
+            served[version] = http[algorithm].lower()
     latest = entry.get("latest")
     if not isinstance(latest, str) or latest not in versions: return None
-    return { "algorithm": algorithm, "versions": versions, "latest": latest, "artifact": name }
+    return { "algorithm": algorithm, "versions": versions, "served": served, "latest": latest, "artifact": name }
 
 
 async def trusted_reference(record: dict) -> dict:
@@ -72,6 +52,8 @@ async def trusted_reference(record: dict) -> dict:
     if not url:
         url, origin = (record.get("reference") or {}).get("manifest"), "host-supplied"
     if not url: return { "status": "unavailable", "reason": "NO_REFERENCE" }
+    if origin == "peer-config" and not settings.debug and not PINNED.search(urlsplit(url).path):
+        return { "status": "unavailable", "reason": "REFERENCE_NOT_PINNED", "url": url, "origin": origin }
     try: manifest = parse_manifest(await netcheck.reference(url), artifact)
     except CheckError as exc:
         return { "status": "unavailable", "reason": exc.code, "url": url, "origin": origin }
@@ -83,33 +65,33 @@ async def trusted_reference(record: dict) -> dict:
     return dict(manifest, status="ok", url=url, origin=origin)
 
 
-async def observe(record: dict) -> dict:
+async def observe(origin: str, record: dict) -> dict:
     artifact, algorithm = record["id"], record["algorithm"]
     result = { "artifact": artifact, "claimed": record["hash"], "algorithm": algorithm, "url": record.get("url") }
-
     if record.get("url"):
         try:
-            response = await netcheck.get(settings.host, record["url"], settings.max_response_bytes)
+            response = await netcheck.get(origin, record["url"], settings.max_response_bytes)
             if response["status"] == 200:
                 result["observed"] = _digest(algorithm, response["body"])
                 result["size"] = len(response["body"])
-            else:
-                result["fetch_error"] = f"HTTP_{response['status']}"
-        except CheckError as exc:
-            result["fetch_error"] = exc.code
-    else:
-        result["fetch_error"] = "NOT_PUBLICLY_SERVED"
+            else: result["fetch_error"] = f"HTTP_{response['status']}"
+        except CheckError as exc: result["fetch_error"] = exc.code
+    else: result["fetch_error"] = "NOT_PUBLICLY_SERVED"
 
     reference = await trusted_reference(record)
     result["reference"] = { key: reference.get(key) for key in ("status", "reason", "url", "origin", "latest") }
     observed = result.get("observed")
     if reference.get("status") == "ok":
-        versions = reference["versions"] if reference["algorithm"] == algorithm else {}
-        matched = next((version for version, value in versions.items() if value == (observed or record["hash"])), None)
+        same = reference["algorithm"] == algorithm
+        versions = reference["versions"] if same else {}
+        served = reference.get("served") or {} if same else {}
+        value = observed or record["hash"]
+        matched = next((version for version, digest in served.items() if digest == value), None) \
+            or next((version for version, digest in versions.items() if digest == value and version not in served),
+                    None)
         result["served_version"] = matched
         result["latest_version"] = reference.get("latest")
-        served = record.get("served_version") or ""
-        result["reference_hash"] = versions.get(matched) if matched else versions.get(served)
+        result["reference_hash"] = (served.get(matched) or versions.get(matched)) if matched else None
 
     if observed is None: status = "unreachable" if result.get("fetch_error") != "NOT_PUBLICLY_SERVED" else "not-served"
     elif observed != record["hash"]: status = "served-mismatch"
@@ -119,36 +101,3 @@ async def observe(record: dict) -> dict:
     else: status = "verified"
     result["status"] = status
     return result
-
-
-async def run() -> list[dict]:
-    if not settings.is_peer: return []
-    from wf_peering.services import IntegrityService
-    results = []
-    for group in await IntegrityService.current():
-        for item in group["records"]:
-            record = item["record"]
-            if item.get("missing_since") or record.get("served") is False: continue
-            try: outcome = await observe(record)
-            except Exception as exc:
-                log_factory.exception(exc, f"[peering] Observing {record.get('id')} failed.")
-                continue
-            results.append(outcome)
-            async with db.async_executor(model=Observation) as e:
-                await e.insert(Observation(
-                    artifact=record["id"], ts=utc_now(), status=outcome["status"],
-                    claimed_hash=outcome.get("claimed"), observed_hash=outcome.get("observed"),
-                    reference_hash=outcome.get("reference_hash"), served_version=outcome.get("served_version"),
-                    latest_version=outcome.get("latest_version"), detail=dumps(outcome)
-                ))
-            await _escalate(outcome)
-    return results
-
-
-async def latest(artifact: str) -> dict | None:
-    async with db.async_executor(model=Observation) as e:
-        result = await e.exec(select(Observation).where(Observation.artifact == artifact)
-                              .order_by(Observation.id.desc()).limit(1))
-        row = result.first()
-        if not row: return None
-        return json.loads(row.detail) | { "ts": row.ts }

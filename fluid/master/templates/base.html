@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="{{ lang }}">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="referrer" content="no-referrer">
+    <title>{% block title %}{{ _("NET_UI_TITLE") }}{% endblock %}</title>
+    {{ theme }}
+    <link rel="stylesheet" href="{{ assets }}/css/net.css?v={{ version }}">
+    <script type="application/json" id="net-texts">{{ texts | tojson }}</script>
+    <script src="{{ assets }}/js/net.js?v={{ version }}" defer></script>
+    {% block head %}{% endblock %}
+</head>
+<body>
+<a class="skip" href="#main">{{ _("NET_UI_SKIP") }}</a>
+<header class="bar">
+    <a class="brand" href="/">{{ _("NET_UI_TITLE") }}</a>
+    <nav aria-label="{{ _("NET_UI_TITLE") }}">
+        <a href="/" {% if page == "apps" %}aria-current="page"{% endif %}>{{ _("NET_UI_NAV_APPS") }}</a>
+    </nav>
+    <button type="button" class="theme" id="theme" aria-pressed="false">{{ _("NET_UI_THEME") }}</button>
+</header>
+<p class="responder">{{ _("NET_UI_RESPONDER", node=node, role=role_label) }}</p>
+{% if debug %}<p class="notice">{{ _("NET_UI_DEBUG") }}</p>{% endif %}
+{% if legal_missing %}<p class="notice">{{ _("NET_UI_LEGAL_MISSING", fields=legal_missing | join(", ")) }}</p>{% endif %}
+<main id="main" tabindex="-1">
+{% block main %}{% endblock %}
+</main>
+<footer class="foot">
+    <a href="/imprint" {% if page == "imprint" %}aria-current="page"{% endif %}>{{ _("NET_UI_NAV_IMPRINT") }}</a> · <a href="/privacy" {% if page == "privacy" %}aria-current="page"{% endif %}>{{ _("NET_UI_NAV_PRIVACY") }}</a> · <code>{{ net or "–" }}</code>
+</footer>
+</body>
+</html>

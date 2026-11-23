@@ -1,6 +1,6 @@
 ---
 name: app-webfluid-peer
-description: Work on the WebFluid-Peer app (`peering` repository), an independent peer that replicates and verifies a WebFluid host — live ledger replication, the daily full sync, observations of served artifacts, checkpoints and the public peer API. Load it before changing how a peer syncs, observes, checkpoints or reports trust, and before deploying or configuring a peer.
+description: Work on the WebFluid peering node app (`peering` repository) — primary and secondary masters and outbound-only default peers of a peering network: genesis, join, signed-object sync, application replication and attestations, the event chain, the dashboard and the legal pages. Load it before changing how a node joins, syncs, attests, sequences or reports, and before deploying or configuring one.
 ---
 
 # WebFluid-Peer — agent guide
@@ -10,40 +10,42 @@ This file is short enough to read whole; the ranges are for coming back to one s
 it points to opens with an index of the same shape — read those first 30 lines, then only the ranges
 the task needs.
 
-- `23-38` **Rules**
-- `39-47` **Verify**
-- `48-51` **References**
+- `24-41` **Rules**
+- `42-49` **Verify**
+- `50-53` **References**
 <!-- /index -->
 
-The peer is a plain WebFluid main app without Additives. Everything it shares with the host —
-protocols, storage, verification, checkpoints, trust — comes from the `wf-peering` extension; this
-repository adds only what only a peer does: the connection to the host, the full sync, the
-observations and the peer role.
+The node is a plain WebFluid main app without Additives. Everything it shares with applications and
+other nodes — protocols, verification, the verdict, the client — comes from the `wf-peering`
+extension; this repository adds what only masters and peers do: topology, genesis, join admission,
+the signed-object store and sync, replication and attestation, the event chain, the dashboard and the
+legal pages.
 
 ## Rules
 
 1. **Peer-only behaviour lives in `fluid/`; shared behaviour belongs in `wf-peering`.** If host and
    peer must agree on it, it is extension code and is changed there; every contract change in the
    extension's `CHANGELOG.md` is adopted here in the same release.
-2. **`PeerRole` is the only seam.** Add a method to the role in `fluid/utils/role.py` instead of
-   branching on the role inside shared code.
-3. **Never trust the host's word.** Only peer-configured reference manifests establish verified provenance.
-   Host-supplied manifests remain unreferenced. Shared head verification binds origin and freshness;
-   range pages must advance. Observations fetch what the host serves and compare it with
-   the published references; a mismatch is recorded, never smoothed over.
-4. **One origin.** `PEERING_HOST` is the host's `BASE_URL` exactly; a second spelling breaks
-   identity checks.
+2. **The topology decides the surface.** `utils/topology.resolve` turns `IS_MASTER`/`JOIN_MASTER` into
+   primary, secondary or peer; master routers, assets, templates and translations are registered only
+   for masters (`fluid/app/`), a default peer serves `/api/health` and `/api/v1/status` and nothing else.
+3. **Never trust a relay.** Every received object is verified and authorized by `ObjectStore.put`
+   (signature, network, signer role, membership chain); masters transport but never author others'
+   statements. Only node-configured reference manifests establish provenance, outside debug mode only
+   at a full commit id.
+4. **Never found by accident.** Only `JOIN_MASTER = None` founds; an existing binding or
+   `keys/genesis.json` is restored instead, an anchor without genesis refuses to start, an unreachable
+   upstream is retried.
 5. **The factory lives in `fluid/__init__.py`** (WebFluid `1.0.0rc1`); `main.py` only starts it.
 6. **The node key is a file** (`PEERING_KEY_FILE`); never commit it or put it into config.
 
 ## Verify
 
 - `python -m pytest -q -p no:cacheprovider` in `tests/` boots the peer in-process.
-- `GET /api/v1/status` of a running peer shows the role `peer`, the host it watches, the ledger
-  head and the latest checkpoint.
-- Against a local host: run the host with the `peering` Additive, then `wf run main` here with
-  `PEERING_HOST` (in `fluid/config.py`, overridable in `fluid/_my_config.py`) set to the host's
-  `BASE_URL`.
+- `PEERING_E2E=1 python -m pytest -q integration/test_network_e2e.py` in `tests/` runs a real
+  multi-process network (masters, peer, two applications with the Additive).
+- `GET /api/v1/status` of a node shows its topology, network id, anchor, policy, members and sync
+  sources.
 
 ## References
 

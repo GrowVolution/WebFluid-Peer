@@ -1,0 +1,108 @@
+{% extends "net/base.html" %}
+{% block title %}{{ _("NET_PRIVACY_HEADING") }}{% endblock %}
+{% block main %}
+{% set p = legal.privacy %}
+{% set c = legal.controller %}
+{% set confirmed = p.legal_basis == "art6_1_f" %}
+<article class="card prose">
+    <h1>{{ _("NET_PRIVACY_HEADING") }}</h1>
+    <p>{{ _("NET_PRIVACY_INTRO") }}</p>
+
+    <h2>{{ _("NET_PRIVACY_CONTROLLER") }}</h2>
+    <p>{{ _("NET_PRIVACY_CONTROLLER_TEXT") }}</p>
+    <p>{{ c.name or "–" }}{% for line in c.address or [] %}<br>{{ line }}{% endfor %}{% if p.controller_email or c.email %}<br><a href="mailto:{{ p.controller_email or c.email }}">{{ p.controller_email or c.email }}</a>{% endif %}</p>
+    {% if p.dpo %}<p>{{ _("NET_PRIVACY_DPO", name=p.dpo.name or "–", email=p.dpo.email) }}</p>
+    {% elif p.dpo is sameas false %}<p>{{ _("NET_PRIVACY_DPO_NONE") }}</p>{% endif %}
+    {% if legal.outside_eea %}
+    {% if p.representative %}<p>{{ _("NET_PRIVACY_REPRESENTATIVE") }} {{ p.representative.name }}{% for line in p.representative.address or [] %}, {{ line }}{% endfor %}</p>
+    {% elif p.representative_exempt %}<p>{{ _("NET_PRIVACY_REPRESENTATIVE_EXEMPT") }}</p>{% endif %}
+    {% endif %}
+    <p>{{ _("NET_PRIVACY_INDEPENDENT") }}</p>
+    {% if p.joint %}<p>{{ p.joint }}</p>{% endif %}
+
+    <h2>{{ _("NET_PRIVACY_MATRIX") }}</h2>
+    <p class="muted">{{ _("NET_PRIVACY_MATRIX_NOTE") }}</p>
+    <div class="table-wrap">
+    <table class="matrix">
+        <thead><tr>
+            <th scope="col">{{ _("NET_PRIVACY_COL_PROCESS") }}</th><th scope="col">{{ _("NET_PRIVACY_COL_SUBJECTS") }}</th>
+            <th scope="col">{{ _("NET_PRIVACY_COL_DATA") }}</th><th scope="col">{{ _("NET_PRIVACY_COL_PURPOSE") }}</th>
+            <th scope="col">{{ _("NET_PRIVACY_COL_BASIS") }}</th><th scope="col">{{ _("NET_PRIVACY_COL_RECIPIENTS") }}</th>
+            <th scope="col">{{ _("NET_PRIVACY_COL_RETENTION") }}</th><th scope="col">{{ _("NET_PRIVACY_COL_DELETION") }}</th>
+            <th scope="col">{{ _("NET_PRIVACY_COL_THIRD") }}</th>
+        </tr></thead>
+        <tbody>
+        {% for flow in legal.flows %}
+        {% set key = "NET_FLOW_" ~ (flow.id | upper) %}
+        <tr>
+            <th scope="row">{{ _(key ~ "_PROCESS") }}</th>
+            <td>{{ _(key ~ "_SUBJECTS") }}</td>
+            <td>{{ _(key ~ "_DATA") }}</td>
+            <td>{{ _(key ~ "_PURPOSE") }}</td>
+            <td>{{ _("NET_PRIVACY_BASIS_F") if confirmed else _("NET_PRIVACY_BASIS_UNCONFIRMED") }}</td>
+            <td>{{ _("NET_PRIVACY_PUBLIC") if flow.public else _("NET_PRIVACY_NOT_PUBLIC") }}</td>
+            <td>
+                {%- if flow.retention == "transient" %}{{ _("NET_PRIVACY_R_TRANSIENT") }}
+                {%- elif flow.retention == "proxy_logs_days" %}{% if p.proxy_logs_days %}{{ _("NET_PRIVACY_R_PROXY", days=p.proxy_logs_days) }}{% else %}{{ _("NET_PRIVACY_R_PROXY_NONE") }}{% endif %}
+                {%- elif flow.retention == "metadata" %}{{ _("NET_PRIVACY_R_METADATA", days=legal.retention_days) }}
+                {%- elif flow.retention == "network" %}{{ _("NET_PRIVACY_R_NETWORK") }}
+                {%- elif flow.retention == "declaration" %}{{ _("NET_PRIVACY_R_DECLARATION") }}
+                {%- elif flow.retention == "window" %}{{ _("NET_PRIVACY_R_WINDOW") }}
+                {%- elif flow.retention == "backups_days" %}{% if p.backups_days %}{{ _("NET_PRIVACY_R_BACKUPS", days=p.backups_days) }}{% else %}{{ _("NET_PRIVACY_R_BACKUPS_NONE") }}{% endif %}
+                {%- endif -%}
+            </td>
+            <td>{% if flow.retention == "metadata" %}{{ _("NET_PRIVACY_D_REQUEST") }}{% elif flow.retention == "network" %}{{ _("NET_PRIVACY_D_EVIDENCE") }}{% elif flow.retention == "declaration" %}{{ _("NET_PRIVACY_D_DECLARATION") }}{% else %}{{ _("NET_PRIVACY_D_AUTO") }}{% endif %}</td>
+            <td>{{ _("NET_PRIVACY_YES") if flow.third else _("NET_PRIVACY_NO") }}</td>
+        </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    </div>
+
+    <h2>{{ _("NET_PRIVACY_DETAILS") }}</h2>
+    {% set log = (_("NET_PRIVACY_LOG_PATH") if legal.logging.path else "") ~ (_("NET_PRIVACY_LOG_CLIENT") if legal.logging.client else "") ~ (_("NET_PRIVACY_LOG_AGENT") if legal.logging.agent else "") %}
+    <p>{{ _("NET_PRIVACY_VISIT_TEXT", log=log) }}</p>
+    <p>{{ _("NET_PRIVACY_HOSTING_TEXT", hosting=p.hosting or "–") }}</p>
+    <p>{{ _("NET_PRIVACY_APPS_TEXT") }}</p>
+    <p>{{ _("NET_PRIVACY_NODES_TEXT") }}</p>
+    <p>{{ _("NET_PRIVACY_OPERATOR_TEXT") }}</p>
+    <p>{{ _("NET_PRIVACY_LIVENESS_TEXT") }}</p>
+    <p>{{ _("NET_PRIVACY_LEDGER_TEXT") }}</p>
+    <p>{{ _("NET_PRIVACY_EVENTS_TEXT") }}</p>
+    <p>{{ _("NET_PRIVACY_VERIFIER_TEXT") }}</p>
+    <p>{{ _("NET_PRIVACY_REFERENCES_TEXT") }}</p>
+
+    <h2>{{ _("NET_PRIVACY_BASIS") }}</h2>
+    <p>{{ _("NET_PRIVACY_BASIS_TEXT") if confirmed else _("NET_PRIVACY_BASIS_MISSING") }}</p>
+
+    <h2>{{ _("NET_PRIVACY_RECIPIENTS") }}</h2>
+    <p>{{ _("NET_PRIVACY_RECIPIENTS_TEXT") }}</p>
+
+    <h2>{{ _("NET_PRIVACY_TRANSFERS") }}</h2>
+    <p>{{ _("NET_PRIVACY_TRANSFERS_TEXT") }}</p>
+    <p>{% if p.transfers is sameas false %}{{ _("NET_PRIVACY_TRANSFERS_NONE") }}{% else %}{{ p.transfers or "–" }}{% endif %}</p>
+
+    <h2>{{ _("NET_PRIVACY_RETENTION") }}</h2>
+    <p>{{ _("NET_PRIVACY_RETENTION_TEXT", days=legal.retention_days) }}</p>
+
+    <h2>{{ _("NET_PRIVACY_SECURITY") }}</h2>
+    <p>{{ _("NET_PRIVACY_SECURITY_TEXT") }}</p>
+
+    <section class="callout" aria-labelledby="objection">
+        <h2 id="objection">{{ _("NET_PRIVACY_OBJECTION") }}</h2>
+        <p>{{ _("NET_PRIVACY_OBJECTION_TEXT", email=p.controller_email or c.email or "–") }}</p>
+    </section>
+
+    <h2>{{ _("NET_PRIVACY_RIGHTS") }}</h2>
+    <p>{{ _("NET_PRIVACY_RIGHTS_TEXT", email=p.controller_email or c.email or "–") }}</p>
+    <p>{{ _("NET_PRIVACY_COMPLAINT", authority=p.supervisory_authority or "–") }}</p>
+
+    <h2>{{ _("NET_PRIVACY_PROVISION") }}</h2>
+    <p>{{ _("NET_PRIVACY_PROVISION_TEXT") }}</p>
+
+    <h2>{{ _("NET_PRIVACY_DEVICE") }}</h2>
+    <p>{{ _("NET_PRIVACY_DEVICE_TEXT") }}</p>
+
+    <p class="muted">{{ _("NET_PRIVACY_VERSION", software=software) }}{% if p.updated %} · {{ p.updated }}{% endif %}</p>
+</article>
+{% endblock %}

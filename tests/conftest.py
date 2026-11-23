@@ -3,21 +3,20 @@ import os, pytest, pytest_asyncio, shutil, sys, tempfile
 
 SOURCE = Path(__file__).resolve().parents[1]
 
-ROOT = Path(tempfile.mkdtemp(prefix="peering-peer-"))
-
-os.environ.setdefault("PEERING_TEST_HOST", "http://127.0.0.1:8591")
+ROOT = Path(tempfile.mkdtemp(prefix="peering-master-"))
 
 MY_CONFIG = '''class MyConfig:
     BASE_URL = "http://127.0.0.1:8571"
-    PEERING_HOST = {host!r}
+    IS_MASTER = True
+    JOIN_MASTER = None
+    NETWORK_NAME = "tests"
     PEERING_PUBLIC_URL = "http://127.0.0.1:8571"
     PEERING_TRUSTED_REFERENCES = {{}}
     PEERING_SCHEDULE = False
     PEERING_ALLOW_INSECURE = True
     PEERING_KEY_FILE = {key!r}
-    PEERING_CHECKPOINT_GRACE = 2
-    PEERING_SYNC_ATTEMPTS = 2
     PEERING_REQUEST_TIMEOUT = 5
+    LEGAL = {{"operator": {{"name": "Beispiel Peering e.V.", "form": "association", "registered": True, "commercial": False, "country": "DE", "address": ["Musterweg 1", "12345 Musterstadt", "Deutschland"], "email": "kontakt@example.org", "contact_form": "https://example.org/kontakt", "representatives": ["Erika Beispiel (Vorsitz)"], "register": {{"court": "Amtsgericht Musterstadt", "type": "VR", "number": "VR 12345"}}}}, "privacy": {{"legal_basis": "art6_1_f", "controller_email": "datenschutz@example.org", "hosting": "Beispiel Hosting GmbH (Auftragsverarbeitung nach Art. 28 DSGVO), Rechenzentrum in Deutschland", "proxy_logs_days": 7, "backups_days": 14, "supervisory_authority": "Die Landesbeauftragte für Datenschutz Musterland, Musterstraße 2, 12345 Musterstadt", "transfers": "Dem Betreiber sind derzeit keine Master oder Peers außerhalb von EU/EWR bekannt.", "dpo": False, "updated": "Stand: Beispielkonfiguration"}}}}
     RATELIMIT_ENABLED = False
     SESSION_COOKIE_SECURE = False
 '''
@@ -26,9 +25,8 @@ MY_CONFIG = '''class MyConfig:
 def _build():
     shutil.copy(SOURCE / "main.py", ROOT / "main.py")
     shutil.copytree(SOURCE / "fluid", ROOT / "fluid", ignore=shutil.ignore_patterns("__pycache__", "_my_config.py"))
-    (ROOT / "fluid" / "_my_config.py").write_text(MY_CONFIG.format(
-        host=os.environ["PEERING_TEST_HOST"], key=str(ROOT / "keys" / "node.key")
-    ), encoding="utf-8")
+    (ROOT / "fluid" / "_my_config.py").write_text(MY_CONFIG.format(key=str(ROOT / "keys" / "node.key")),
+                                                  encoding="utf-8")
 
 
 _build()
@@ -38,6 +36,7 @@ os.environ.update({
     "EXT_SCHEDULING": "1",
     "EXT_BABEL": "1",
     "WF_PROCESSING": "1",
+    "WF_THEMES": "1",
     "DATABASE_URI": f"sqlite:///{(ROOT / 'test.db').as_posix()}"
 })
 os.environ.pop("WF_ADDITIVES", None)
@@ -59,7 +58,9 @@ async def fluid():
     await app._lifecycle.run_startup()
     create_tables(db)
     from wf_peering.services import UptimeService
+    from wf_peering.role import current
     await UptimeService.boot()
+    await current().startup()
     yield app
 
 

@@ -1,0 +1,44 @@
+{% extends "net/base.html" %}
+{% block title %}{{ _("NET_APP_HEADING", app=app) }}{% endblock %}
+{% block head %}<script src="{{ assets }}/js/app.js?v={{ version }}" defer></script>{% endblock %}
+{% block main %}
+<p><a href="/">{{ _("NET_APP_BACK") }}</a></p>
+<section class="card" id="detail" data-app="{{ app }}">
+    <h1>{{ _("NET_APP_HEADING", app=app) }}</h1>
+    {% if not detail %}
+    <p class="notice">{{ _("NET_APP_UNKNOWN") }}</p>
+    {% else %}
+    {% set verdict = detail.verdict %}
+    <h2>{{ _("NET_APP_VERDICT") }}</h2>
+    <p class="verdict level-{{ verdict.level }}"><strong>{{ verdict.status }}</strong> — {{ _("NET_S_" ~ (verdict.status | upper)) }}</p>
+    <p class="muted">{{ _("NET_APP_VERDICT_NOTE") }}</p>
+    <dl class="kv">
+        <dt>{{ _("NET_APP_ORIGIN") }}</dt><dd>{{ detail.origin or "–" }}</dd>
+        <dt>{{ _("NET_APP_JOINED") }}</dt><dd><code>{{ detail.joined_via or "–" }}</code> · {{ detail.admitted_at }}</dd>
+        <dt>{{ _("NET_NET_ID") }}</dt><dd><code>{{ verdict.net }}</code> ({{ verdict.anchor.mode }})</dd>
+        <dt>{{ _("NET_NET_PRIMARY") }}</dt><dd><code>{{ status.primary }}</code></dd>
+        <dt>{{ _("NET_APP_PROVING") }}</dt><dd>{{ verdict.independence.proving }}</dd>
+        <dt>{{ _("NET_APP_DECLARED") }}</dt><dd>{{ verdict.independence.declared_groups }} / {{ verdict.independence.required }}{% for name, group in verdict.independence.declared.items() %}<br>{{ group.names | join(" / ") or "–" }} · {{ _("NET_BASIS_" ~ (group.basis | upper)) }} · {{ group.nodes | length }}{% endfor %}</dd>
+        <dt>{{ _("NET_APP_INDEPENDENT") }}</dt><dd>{{ verdict.independence.independent_groups }} / {{ verdict.independence.required }}</dd>
+        <dt>{{ _("NET_APP_SEEN") }}</dt><dd>{{ detail.last_seen or "–" }}</dd>
+        <dt>{{ _("NET_APP_REPLICATION") }}</dt><dd>#{{ detail.replicated_seq }} · {{ detail.replicated_at or "–" }}{% if detail.replication_error %} · {{ detail.replication_error }}{% endif %}</dd>
+        <dt>{{ _("NET_APP_LENGTH") }}</dt><dd>{{ detail.chain_length }}</dd>
+        <dt>{{ _("NET_APP_ROOT") }}</dt><dd><code>{{ detail.root or "–" }}</code></dd>
+        <dt>{{ _("NET_APP_BASIS") }}</dt><dd>{% if verdict.basis %}#{{ verdict.basis.seq }} · <code>{{ verdict.basis.root }}</code>{% else %}–{% endif %}</dd>
+        <dt>{{ _("NET_APP_AGE") }}</dt><dd>{{ verdict.evidence_age if verdict.evidence_age is not none else "–" }}</dd>
+    </dl>
+    <h2>{{ _("NET_APP_REASONS") }}</h2>
+    {% if verdict.reasons %}<ul>{% for reason in verdict.reasons %}<li><code>{{ reason }}</code></li>{% endfor %}</ul>{% else %}<p class="muted">{{ _("NET_APP_NONE") }}</p>{% endif %}
+    <h2>{{ _("NET_APP_SIGNERS") }}</h2>
+    {% if verdict.signers %}<ul>{% for signer in verdict.signers %}<li>{{ signer.role }} <code>{{ signer.node }}</code> · {{ signer.operator.name if signer.operator else _("NET_APP_NO_DECLARATION") }}{% if signer.group %} · {{ signer.group }}{% endif %} · {{ signer.match }} · {{ signer.observed_at }}</li>{% endfor %}</ul>{% else %}<p class="muted">{{ _("NET_APP_NONE") }}</p>{% endif %}
+    {% if verdict.independence.unresolved %}<h2>{{ _("NET_APP_UNRESOLVED") }}</h2><ul>{% for entry in verdict.independence.unresolved %}<li><code>{{ entry.node }}</code> · <code>{{ entry.reason }}</code></li>{% endfor %}</ul>{% endif %}
+    <h2>{{ _("NET_APP_CHECKPOINTS") }}</h2>
+    {% if heads %}<ul>{% for head in heads %}<li><code>{{ head.by }}</code> · #{{ head.seq }} · <code>{{ head.root[:16] }}…</code> · {{ head.at }}</li>{% endfor %}</ul>{% else %}<p class="muted">{{ _("NET_APP_NONE") }}</p>{% endif %}
+    <h2>{{ _("NET_APP_CONFLICTS") }}</h2>
+    {% if verdict.conflicts %}<ul>{% for conflict in verdict.conflicts %}<li>{{ conflict.kind }} · {% for item in conflict.objects %}<code>{{ item[:16] }}…</code> {% endfor %}</li>{% endfor %}</ul>{% else %}<p class="muted">{{ _("NET_APP_NONE") }}</p>{% endif %}
+    <h2>{{ _("NET_APP_ARTIFACTS") }}</h2>
+    {% if verdict.artifacts %}<ul>{% for item in verdict.artifacts %}<li><code>{{ item.id }}</code> · {{ item.status }} · <code>{{ item.signer }}</code> · {{ item.observed_at }}</li>{% endfor %}</ul>{% else %}<p class="muted">{{ _("NET_APP_NONE") }}</p>{% endif %}
+    <p><a href="/api/v1/apps/{{ app }}/evidence">{{ _("NET_APP_EVIDENCE") }}</a></p>
+    {% endif %}
+</section>
+{% endblock %}

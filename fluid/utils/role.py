@@ -1,112 +1,59 @@
-from webfluid.utils.logging import factory as log_factory
 from wf_peering import NodeRole, __version__
-from wf_peering.exceptions import CheckError
-from wf_peering.protocol.entries import parse_ts, to_ts
-from wf_peering.protocol.trust import Signal
-from wf_peering.services import PeerService, JournalService, StateService
-from wf_peering.settings import settings, HOST_API
-from wf_peering.utils import netcheck
-from datetime import datetime, timedelta, UTC
-import asyncio
-
-HOUR = 3600
-DAY = 86400
+from wf_peering.services import BindingService, IdentityService, JournalService
+from wf_peering.settings import settings
 
 
-class PeerRole(NodeRole):
-    name = "peer"
+class NetRole(NodeRole):
+    shared_jobs = ("startup", "heartbeat", "activity", "retention")
 
-    def __init__(self, version: str | None = None):
+    def __init__(self, topology, version: str | None = None, policy: dict | None = None, name: str = "webfluid",
+                 retention_days: int = 90):
+        self.topology = topology
+        self.name = topology.role
+        self.serves_ui = topology.role == "master"
         self.software = f"peering-app/{version or '0'} wf-peering/{__version__}"
+        self.policy = policy
+        self.network_name = name
+        self.retention_days = retention_days
 
     async def startup(self) -> None:
-        from .sync import HostLink, FullSync
-        interrupted = await FullSync.close_interrupted()
-        await JournalService.append("peering:peer-start", { "host": settings.host, "interrupted_syncs": interrupted })
-        HostLink.ensure()
+        from .legacy import LegacyMigration
+        from .link import UpstreamLink
+        from .network import NetworkService
+        await JournalService.append("peering:node-role", { "role": self.topology.label,
+                                                          "upstream": self.topology.upstream })
+        await LegacyMigration.run()
+        if self.topology.role == "master":
+            binding = await NetworkService.ensure(self.network_name, self.policy)
+            if binding is not None:
+                await NetworkService.maintain_policy(self.policy)
+                from .operator import OperatorService
+                await OperatorService.maintain()
+        UpstreamLink.ensure()
 
     async def heartbeat(self) -> None:
-        from .sync import HostLink
-        HostLink.ensure()
+        from .link import UpstreamLink
+        UpstreamLink.ensure()
 
-    async def discover(self) -> None:
-        report = await PeerService.check_node(settings.host)
-        await StateService.set("host_check", report)
-        try:
-            status, data, _ = await netcheck.get_json(settings.host, f"{HOST_API}/peers", 512 * 1024)
-            if status == 200 and isinstance(data, dict):
-                for peer in (data.get("peers") or [])[:settings.max_peers]:
-                    if isinstance(peer, dict) and isinstance(peer.get("url"), str):
-                        await PeerService.remember(peer["url"], "host-reported", None, None)
-        except CheckError as exc:
-            log_factory.warning(f"[peering] Reading the host's peer directory failed: {exc.code}")
-
-    async def checkpoint_basis(self, day: str, moment: datetime) -> tuple[int, str, dict]:
-        from .sync import FullSync
-        deadline = moment + timedelta(seconds=settings.checkpoint_grace)
-        run = await FullSync.for_day(day)
-        while run is not None and run.status == "running" and datetime.now(UTC) < deadline:
-            await asyncio.sleep(5)
-            run = await FullSync.for_day(day)
-
-        if run is not None and run.status == "success":
-            late = run.finished_at and parse_ts(run.finished_at) > moment
-            return run.to_seq or 0, "verified", { "status": "verified", "id": run.id, "finished_at": run.finished_at,
-                                                  "to_seq": run.to_seq, "late": bool(late) }
-
-        last = await FullSync.last_success()
-        status = "overlap" if run is not None and run.status == "running" else "stale"
-        return (last.to_seq or 0) if last else 0, status, {
-            "status": status,
-            "id": last.id if last else None,
-            "finished_at": last.finished_at if last else None,
-            "to_seq": last.to_seq if last else None,
-            "day_run": run.id if run else None,
-            "day_run_status": run.status if run else "missing"
-        }
-
-    async def publish_checkpoint(self, signed: dict) -> None:
-        from .sync import HostLink
-        await HostLink.send({ "type": "checkpoint", **signed })
-
-    async def signals(self, now: datetime) -> list:
-        from .sync import HostLink, FullSync, FRESH_SYNC
-        signals = []
-        link = HostLink.snapshot()
-        beat = link.get("last_heartbeat")
-        age = (now - parse_ts(beat)).total_seconds() if beat else None
-        alive = link.get("state") == "connected" and age is not None and age < settings.heartbeat_interval * 4
-        fresh = 100 if alive else 0
-        signals.append(Signal("heartbeat_fresh", "reachability", fresh if beat else None, 5, "normal", "local", beat,
-                              None, detail={ "state": link.get("state"), "error": link.get("error") }))
-
-        last = await FullSync.last_success()
-        sync_age = (now - parse_ts(last.finished_at)).total_seconds() if last and last.finished_at else None
-        if sync_age is None: fresh_sync = None
-        elif sync_age < FRESH_SYNC.total_seconds(): fresh_sync = 100
-        else: fresh_sync = 50 if sync_age < 50 * HOUR else 10
-        signals.append(Signal("full_sync_fresh", "integrity", fresh_sync,
-                              15, "high", "local", last.finished_at if last else None, None,
-                              detail={ "age_seconds": int(sync_age) if sync_age is not None else None }))
-        runs = await FullSync.runs(14)
-        recent = [run for run in runs if run["started_at"] >= to_ts(now - timedelta(days=7))]
-        if recent:
-            failed = sum(1 for run in recent if run["status"] == "failed")
-            signals.append(Signal("sync_failures_7d", "history", max(0, 100 - 25 * failed), 5, "normal", "local",
-                                  recent[0]["started_at"], 2 * DAY, detail={ "failed": failed, "runs": len(recent) }))
-        return signals
-
-    async def observation(self, artifact: str) -> dict | None:
-        from .observe import latest
-        return await latest(artifact)
+    async def retention(self) -> None:
+        from .apps import AppRegistry
+        from .network import NetworkService
+        from .operator import OperatorService
+        await NetworkService.prune_nonces()
+        if await BindingService.network():
+            await AppRegistry.retention(self.retention_days)
+            await OperatorService.retention()
 
     async def status(self) -> dict:
-        from .sync import HostLink, FullSync
-        last = await FullSync.last_success()
+        from .link import UpstreamLink
+        binding = await BindingService.get()
         return {
-            "link": HostLink.snapshot(),
-            "last_sync": {
-                "id": last.id, "finished_at": last.finished_at, "to_seq": last.to_seq, "root": last.local_root
-            } if last else None,
-            "host_key": await StateService.get("host_key") or settings.host_key
+            "topology": self.topology.label,
+            "upstream": self.topology.upstream,
+            "network": (binding or {}).get("net"),
+            "anchor": (binding or {}).get("anchor"),
+            "link": UpstreamLink.snapshot() if self.topology.upstream else None
         }
+
+    async def checkpoint_basis(self, day, moment):
+        return 0, "stale", { "status": "none" }
